@@ -1,0 +1,170 @@
+#include <iostream>
+#include <chrono>
+#include <vector>
+#include <pthread.h>
+
+using namespace std;
+using namespace std::chrono;
+
+pthread_mutex_t resMutex;
+
+struct ThreadData
+{
+    int blockSize;
+    int N;
+    const vector<vector<int>>* A;
+    const vector<vector<int>>* B;
+    int lineI;
+    int columnJ;
+    vector<vector<int>>* C;
+};
+
+// умножение 
+void* MultiplyBl(void* lpParam) {
+    ThreadData* data = (ThreadData*)lpParam;
+
+    int blokSize = data->blockSize;
+    int N = data->N;
+    int lineI = data->lineI;
+    int columnJ = data->columnJ;
+    const vector<vector<int>>& A = *(data->A);
+    const vector<vector<int>>& B = *(data->B);
+    vector<vector<int>>& C = *(data->C);
+
+    int sizeI = min(lineI + blokSize, N);
+    int sizeJ = min(columnJ + blokSize, N);
+
+    for (int i = lineI; i < sizeI; i++) {
+        for (int j = columnJ; j < sizeJ; j++) {
+            int sum = 0;
+            for (int k = 0; k < N; k++) {
+                sum += A[i][k] * B[k][j];
+            }
+            pthread_mutex_lock(&resMutex); // блокируем
+            C[i][j] = sum;
+            pthread_mutex_unlock(&resMutex); 
+        }
+    }
+
+    delete data;
+    return 0;
+}
+
+void EnterMatrices(vector<vector<int>>& A, vector<vector<int>>& B, int N) {
+    cout << "Matrix A" << endl;
+    for (int i = 0; i < N; i++) {
+        cout << "Enter line (max N)" << i << endl; 
+        for (int j = 0; j < N; j++) {
+            cin >> A[i][j];
+        }
+    }
+    cout << "Matrix B" << endl;
+    for (int i = 0; i < N; i++) {
+        cout << "Enter column (max N)" << i << endl;
+        for (int j = 0; j < N; j++) {
+            cin >> B[i][j];
+        }
+    }
+}
+
+void Print(int N, const vector<vector<int>>& matrix) {
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < N; j++) {
+            cout << matrix[i][j] << " ";
+        }
+        cout << endl;
+    }
+}
+
+// Нормисное умножение 
+void MultiplySimple(const vector<vector<int>>& A, const vector<vector<int>>& B, vector<vector<int>>& C, int N) {
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < N; j++) {
+            C[i][j] = 0;
+            for (int k = 0; k < N; k++) {
+                C[i][j] += A[i][k] * B[k][j];
+            }
+        }
+    }
+}
+
+vector<vector<int>> threadMatMult(const vector<vector<int>>& A, const vector<vector<int>>& B, int blockSize, int N) {
+    vector<vector<int>> C(N, vector<int>(N, 0));
+    vector<pthread_t> threads; 
+    int blockDimen = (N + blockSize - 1) / blockSize;
+
+    for (int i = 0; i < blockDimen; i++) {
+        for (int j = 0; j < blockDimen; j++) {
+            int lineI = i * blockSize;
+            int columnJ = j * blockSize;
+
+            ThreadData* data = new ThreadData;
+            data->lineI = lineI;
+            data->columnJ = columnJ;
+            data->blockSize = blockSize;
+            data->N = N;
+            data->A = &A;
+            data->B = &B;
+            data->C = &C;
+
+            pthread_t threadId;
+            int result = pthread_create(&threadId, NULL, MultiplyBl, data);
+            
+            if (result == 0) {
+                threads.push_back(threadId);
+            }
+            else {
+                cerr << "Error creating thread!" << endl;
+                delete data;
+            }
+        }
+    }
+
+    for (auto& thread : threads) {
+        pthread_join(thread, NULL);
+    }
+    return C;
+}
+
+int main() {
+    int N, k; 
+
+    cout << "Enter matrix size N(>5) " << endl;
+    cin >> N;
+
+    cout << "Enter block size k (>1) " << endl;
+    cin >> k;
+
+    pthread_mutex_init(&resMutex, NULL);
+
+    vector<vector<int>> A(N, vector<int>(N));
+    vector<vector<int>> B(N, vector<int>(N));
+    
+    vector<vector<int>> C_simple(N, vector<int>(N, 0)); 
+    vector<vector<int>> C_thread(N, vector<int>(N, 0)); 
+
+    EnterMatrices(A, B, N);
+
+    auto startSimple = high_resolution_clock::now();
+    MultiplySimple(A, B, C_simple, N);
+    auto endSimple = high_resolution_clock::now();
+    auto DurationSimple = duration_cast<microseconds>(endSimple - startSimple);
+    auto startThread = high_resolution_clock::now();
+    C_thread = threadMatMult(A, B, k, N);
+    auto endThread = high_resolution_clock::now();
+    auto DurationThread = duration_cast<microseconds>(endThread - startThread);
+
+    int blockPerSide = (N + k - 1) / k;
+    int totalThreads = blockPerSide * blockPerSide;
+
+    cout << "matrix size : " << N << "\n" << endl;
+    cout << "block size  : " << k << "\n" << endl;
+    cout << "blocks : " << blockPerSide << "\n" << endl;
+    cout << "threads : " << totalThreads << "\n" << endl;
+    cout << "simple time :  " << DurationSimple.count() << " microseconds" <<  "\n" << endl;
+    cout << "threads time : " << DurationThread.count() << " microseconds" <<  "\n" << endl;
+
+    pthread_mutex_destroy(&resMutex);
+
+    return 0;
+}
