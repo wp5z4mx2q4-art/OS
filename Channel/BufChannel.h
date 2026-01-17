@@ -43,22 +43,22 @@ public:
         cv_recv.notify_one();
     }
 
-    std::pair<T, bool> recv() {
-        std::unique_lock<std::mutex> l(m);
+   std::pair<T, bool> recv() {
+    std::unique_lock<std::mutex> l(m);
+       
+    cv_recv.wait(l, [this] {
+        return !buf.empty() || stopped;
+    });
 
-        cv_recv.wait(l, [this] {
-            return !buf.empty() || stopped;
-            });
-
-        if (!buf.empty()) {
-            T res = std::move(buf.front());
-            buf.pop();
-            cv_send.notify_one();
-            return { std::move(res), true };
-        }
-
+    if (stopped && buf.empty()) {
         return { T(), false };
     }
+
+    T res = std::move(buf.front());
+    buf.pop();
+    cv_send.notify_one();
+    return { std::move(res), true };
+}
 
     void close() {
         std::lock_guard<std::mutex> l(m);
@@ -68,3 +68,4 @@ public:
     }
 
 };
+
